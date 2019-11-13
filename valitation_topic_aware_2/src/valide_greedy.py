@@ -1,16 +1,16 @@
-import .valide_graph as graph
+import valide_graph as graph
 
 #def activation_neib(w, neigb_w, actived, gamma, edge_labels):
 #def sampling_one_time(G, list_S, gamma, edge_labels):
 #def calculate_sampling_ap(G, list_S, gamma, edge_labels, R):
 #def proximate_sampling_ap(G, list_S, gamma, edge_labels, R):
 #def influence_spread(G, list_S, gamma):
-#def select(Graph, Sender, gamma, dict_gamma, Item, seeds, PR_relevence, X, alpha, beta, benefit):
-#def greedy(Graph, Sender, gamma, dict_gamma, Item, k, dic_PR, X, alpha, beta):
+#def select(Graph, Sender, gamma, dict_gamma, Item, seeds, PR_relevence, X, coef_sw, coef_f, benefit):
+#def greedy(Graph, Sender, gamma, dict_gamma, Item, k, dic_PR, X, coef_sw, coef_f):
 
 #####################################################sampling_ap###############################
 def activation_neib(w, neigb_w, actived, gamma, edge_labels):
-    print('in the situation:', w, '\'s neigbours=', neigb_w)
+    #print('in the situation:', w, '\'s neigbours=', neigb_w)
 
     # print('actived=',actived)
     # print('neigb=',neigb_w)
@@ -20,7 +20,7 @@ def activation_neib(w, neigb_w, actived, gamma, edge_labels):
     # print('rest=neigb-actived=', rest) check
     new_sender = []
     if rest == []:
-        print('rest has no element')
+        #print('rest has no element')
         return new_sender
 
     for ww in rest:
@@ -30,8 +30,8 @@ def activation_neib(w, neigb_w, actived, gamma, edge_labels):
         # print('r=', r) check
         if pr >= r:
             new_sender.append(ww)
-        else:
-            print(ww, 'is not actived')
+        #else:
+            #print(ww, 'is not actived')
 
     return new_sender
 #end def activation_neib
@@ -97,7 +97,7 @@ def proximate_sampling_ap(G, list_S, gamma, edge_labels, R):
         dic_result[key] = int(value)
     print(dic_result)
 
-return dic_result,prob_activated
+    return dic_result,prob_activated
 #end def proximate_sampling_ap
 
 
@@ -113,7 +113,7 @@ def influence_spread(G, list_S, gamma):
     return prob_active
 #end def influence_spread
 
-def select(Graph, Sender, gamma, dict_gamma, Item, seeds, PR_relevence, X, alpha, beta, benefit):
+def select(Graph, Sender, gamma, dict_gamma, Item, seeds, PR_relevence, X, coef_sw, coef_f, benefit):
     new_rest = list(set(Item) - set(seeds))
     nb_seeds = len(seeds)
     nb_new_seeds = nb_seeds + 1
@@ -150,9 +150,9 @@ def select(Graph, Sender, gamma, dict_gamma, Item, seeds, PR_relevence, X, alpha
     normalized_f = preprocessing.normalize([list_f])
     normalized_influence = preprocessing.normalize([list_influence])
 
-    benefit1 = alpha * normalized_sw[j] + beta * normalized_f[j]
+    benefit1 = coef_sw * normalized_sw[j] + coef_f * normalized_f[j]
     #logger.info("benefit1[j]={}".format(benefit1))
-    benefit2 = (1 - alpha - beta) * normalized_influence[j]
+    benefit2 = (1 - coef_sw - coef_f) * normalized_influence[j]
     total = benefit1 + benefit2
     max_benefit = max(total)
     #logger.info("benefit={}".format(max_benefit))
@@ -160,14 +160,14 @@ def select(Graph, Sender, gamma, dict_gamma, Item, seeds, PR_relevence, X, alpha
     return item, max_benefit, better_gamma
 #end def select
 
-def greedy(Graph, Sender, gamma, dict_gamma, Item, k, dic_PR, X, alpha, beta):
+def greedy(Graph, Sender, gamma, dict_gamma, Item, k, dic_PR, X, coef_sw, coef_f):
     seeds = []  # Storage selected items
     list_m = []  # Storage selected item's benefit
     benefit = 0
     while len(seeds) < k:
         # print("list_item=", seeds)
         #logger.info("list_item={}".format(seeds))
-        item, new_benefit, new_gamma = select(Graph, Sender, gamma, dict_gamma, Item, seeds, dic_PR, X, alpha, beta,
+        item, new_benefit, new_gamma = select(Graph, Sender, gamma, dict_gamma, Item, seeds, dic_PR, X, coef_sw, coef_f,
                                               benefit)
         # print("we selsct ", item)
         #logger.info("we selsct item={}".format(item))

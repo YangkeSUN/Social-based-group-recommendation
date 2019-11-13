@@ -5,6 +5,7 @@ import random
 import argparse
 import logging
 from collections import Counter
+from multiprocessing import Pool
 #from functools import reduce
 
 import networkx as nx
@@ -14,10 +15,12 @@ import numpy as np
 from logzero import setup_logger
 from sklearn import preprocessing
 
-import .valide_math as formula
-import .valide_graph as ns_graph
-import .valide_greedy as ns_greedy
-import .valide_util as ns_util
+import valide_math as formula
+import valide_graph as ns_graph
+import valide_greedy as ns_greedy
+import valide_util as ns_util
+import valide_item_group as ns_item_group
+import valide_group_item as ns_group_item
 
 logger=setup_logger(name='mylogger',logfile='main.log',level=logging.INFO)
 
@@ -27,8 +30,8 @@ logger=setup_logger(name='mylogger',logfile='main.log',level=logging.INFO)
 #def chose_item_sender(inter_info,ratings,k):
 #def choose_gamma(m,k_size,wait_items,genres):
 #def initial(k):
-#def run_one_time(config, k,alpha,beta):
-#def validation(config, nb_k,alpha,beta):
+#def run_one_time(config, k,coef_sw,coef_f):
+#def validation(config, nb_item,coef_sw,coef_f):
 #def load_config(config_path):
 #def main():
 
@@ -50,7 +53,7 @@ def generate_PR_relevence(G, dict_gamma):
         for key, gamma_i in dict_gamma.items():
             rel.append(np.dot(rel_u_t, dict_gamma[key]))
         rel_user_item[str(v)] = list(rel)
-    logger.info("rel_user_item={}".format(rel_user_item))
+    #logger.info("rel_user_item={}".format(rel_user_item))
     return rel_user_item
 #end def generate_PR_relevence 
 
@@ -61,24 +64,14 @@ def userid_group_json(k_ratings):
     for _, row in k_ratings.iterrows():
         user_id, movie_id, rating,time = row
         d.setdefault(user_id, {}).update({movie_id: [rating,time]})
-    jsObj = json.dumps(d)
-    with ns_util.smart_open('user_infogroup.json.gz', 'w') as fileObject
-        fileObject.write(jsObj)
+    #ns_util.smart_json_write(d, 'user_infogroup.json.gz')
     return d
 #end def userid_group_json
 
-def nodelta_prop(links_filename, genres, infogroup):
-    edges = text_read(links_filename)
+def nodelta_prop(links, genres, infogroup):
     prob = {}
     useful_edges_info={}
-    number=0
-    for edge in edges:
-        number=number+1
-        logger.info('the number is ={}'.format(number))
-        edge = edge.split()
-        logger.info('this edge ={}'.format(edge))
-        u = edge[0]
-        v = edge[1]
+    for (u, v) in links.itertuples(index=False):
         try:
             info_u = infogroup[u]
         except:
@@ -113,13 +106,11 @@ def nodelta_prop(links_filename, genres, infogroup):
             rating_v = info_v[i][0]
             time_u = info_u[i][1]
             time_v = info_v[i][1]
-            delta_u_v = abs(rating_u - rating_v)
+            #delta_u_v = abs(rating_u - rating_v)
             if rating_u <= rating_v and time_u <= time_v:
                 list_id_u_v.append(i)
             elif rating_v <= rating_u and time_v <= time_u:
                 list_id_v_u.append(i)
-        logger.info('u to v={}'.format(list_id_u_v))
-        logger.info('v to u={}'.format(list_id_v_u))
         #logger.info('we begin to translate topic')
         sum1 = np.zeros(29)
         for movie in list_id_u_v:
@@ -139,81 +130,50 @@ def nodelta_prop(links_filename, genres, infogroup):
                 # logger.info('we dont have this movie={}'.format(movie2))
                 continue
             sum2 = sum2 + data2
-
         prob2 = sum2 / n2
-        # logger.info('sum1={}'.format(sum1))
-        # logger.info('sum2={}'.format(sum2))
-        logger.info('prob1={}'.format(prob1))
-        logger.info('prob2={}'.format(prob2))
-
         useful_edges_info[str((u, v))]=movie_for_u_v
         prob[str((u, v))] = list(prob1)
         prob[str((v, u))] = list(prob2)
 
-    # text_save(useless_edges, 'useless_edges.txt')
-
-    jsObj1 = json.dumps(prob)
-    fileObject = ns_util_smart_open('prob_nodelta.json', 'w')
-    fileObject.write(jsObj1)
-    fileObject.close()
-
-    jsObj2 = json.dumps(useful_edges_info)
-    fileObject = ns_util_smart_open(links_filename+'_interaction_info.json', 'w')
-    fileObject.write(jsObj2)
-    fileObject.close()
-
+    ns_util.smart_json_write(prob, 'prob_nodelta.json')
+    ns_util.smart_json_write(useful_edges_info, '_interaction_info.json')
     return prob
 #end def nodelta_prop
 
-def chose_item_sender(inter_info,ratings,k):
-    # The process of picking one time: picking the items waiting to be detected, and the senders that have all the ratings of these items
-    exist_items=list(set(list(ratings['movieid'])))
-    exist_items=[str(i) for i in exist_items]
-    #print('exist_items',exist_items)
-    flag=True
-    while flag:
-        info1 = random.sample(inter_info.items(), k)
-        list_items = []
-        for key, value in info1:
-            item=random.choice(value)
-            if item in exist_items:
-                list_items.append(item)
-        if len(list_items)==k:
-            flag=False
+def top_n_most_seen_film(ratings, n):
+    return Counter(list(ratings['movieid'])).most_common(n)
 
-    df = ratings[ratings['movieid'].isin(list_items)]
-    senders=[]
-    groups=df.groupby('userid')
-    for name,group in groups:
-        movies=group['movieid']
-        if len(movies)==k:
-            senders.append(name)
-    items=list(set(list(df['movieid'])))
+def top_n_most_seen_film_within_group(group, ratings, n):
+    return Counter(map(lambda x: x['movieid'], filter((lambda x: x['userid'] in group), ratings.itertuples(index=False)))).most_common(n)
+
+def chose_item_sender(links, ratings, nb_item, groupsize, x_core, top_n):
+    #items, senders = ns_group_item.initial_groups_to_items(links, ratings, x_core, nb_item, groupsize)
+    items, senders = ns_item_group.initial_items_to_groups(ratings, top_n, nb_item, groupsize)
     return items,senders
 #end def chose_item_sender
 
 
-def choose_gamma(m,k_size,wait_items,genres):
+def choose_gamma(m,nb_item,wait_items,genres):
     #挑选m个items，并与gamma做成一一对应的字典，其中包含带检测的wait_items
     item_gamma = {}
     records = {}
 
     # 随机选取m-k个item
-    item_gamma0 = random.sample(genres.items(), m - k_size)
+    item_gamma0 = random.sample(genres.items(), m - nb_item)
 
     # 将item与gamma一一对应做成字典
     for i, (movie, g) in enumerate(item_gamma0):
         item_gamma[i] = np.array(g) / sum(np.array(g))
         records[i] = movie
     #将wait_item加入到字典中
-    for i in range(m - k_size, m):
-        records[i] = wait_items[i % k_size]
+    for i in range(m - nb_item, m):
+        records[i] = wait_items[i % nb_item]
     new_records = {value: key for key, value in records.items()}
 
     for item in wait_items:
         index = new_records[item]
         item_gamma[index] = np.array(genres[str(item)]) / sum(np.array(genres[str(item)]))
-
+    '''
     #将字典转化为dataframe并保存在input下
     df = pd.DataFrame.from_dict(records, orient='index')
     df['item_id'] = df.index
@@ -227,12 +187,12 @@ def choose_gamma(m,k_size,wait_items,genres):
     dff1 = dff[['item_id', 'vec_genres']]
 
     DF=pd.merge(df1,dff1)
-    DF.to_csv('output/Records_movie_id'+str(k_size), sep='\t', index=False)
-
+    DF.to_csv('output/Records_movie_id'+str(nb_item), sep='\t', index=False)
+    '''
     return item_gamma
 #end def choose_gamma
 
-def initial(genres, inter_info, ratings, k):
+def initial(genres, links, ratings, top_n, groupsize, x_core, nb_item):
     #做一些准备工作，得到待观察的items以及sender group，并记录号cut掉关系的ratings
 
     # print('all logs=',len(ratings))
@@ -242,18 +202,18 @@ def initial(genres, inter_info, ratings, k):
     #print(len(exist_items))
 
     ####################################### 选择 k 个 待观察的items，以及 senders#################################
-    items, users = chose_item_sender(inter_info, ratings, k)
+    items, users = chose_item_sender(links, ratings, nb_item, groupsize, x_core, top_n)
 
-    while len(items) != k or len(users) < 100:
-        print('not ok')
-        items, users = chose_item_sender(inter_info, ratings, k)
+    while len(items) != nb_item or len(users) < groupsize:
+        print('initial: not ok')
+        items, users = chose_item_sender(links, ratings, nb_item, groupsize, x_core, top_n)
 
-    senders = random.sample(users, 100)
+    senders = random.sample(users, groupsize)
 
-    logger.info('wait_items ={}'.format(items))
-    logger.info('senders ={}'.format(senders))
-    text_save([items],'output/wait_info.txt')
-    text_save([senders],'output/wait_info.txt')
+    #logger.info('wait_items ={}'.format(items))
+    #logger.info('senders ={}'.format(senders))
+    ns_util.text_save([items],'../output/wait_info.txt')
+    ns_util.text_save([senders],'../output/wait_info.txt')
 
     #######################################删除item与senders间的评价关系##########################################
     # 有了待评价的items以及senders之后，删除senders和items之间的rating——log。
@@ -261,25 +221,25 @@ def initial(genres, inter_info, ratings, k):
         ratings.loc[(ratings['userid'].isin(senders)) & (ratings['movieid'].isin(items))].index)
     #print(len(ratings))
     #print(len(ratings_after_cut))
-    ratings_after_cut.to_csv(str(k)+'ratings_after_cut', sep='\t', index=False)
+    #ratings_after_cut.to_csv(str(nb_item)+'ratings_after_cut', sep='\t', index=False)
 
     return items,senders
 #end def initial
 
-def run_one_time(config, genres, inter_info, ratings, G, k, alpha, beta, links_filename):
+def run_one_time(config, genres, links, ratings, top_n, G, nb_item, groupsize, x_core, coef_sw, coef_f):
     # step1：确定观察对象个数k-size 为k
 
     #step2：选择k个观察对象与senders，并切断他们之间的rating记录
-    wait_items,list_S=initial(genres, inter_info, ratings, k)
+    wait_items, list_S = initial(genres, links, ratings, top_n, groupsize, x_core, nb_item)
 
     #step3：根据cut后的rating以及links信息，计算社交图里，每条边的传播概率（topic-aware），生成prob的json文件储存相关信息
-    k_rating_after_cut_filepath = str(k) + 'ratings_after_cut'
-    rnames = ['user_id', 'movie_id', 'rating', 'time']
-    k_ratings = pd.read_csv(k_rating_after_cut_filepath, skiprows=[0], sep='\t', header=None, names=rnames,engine='python')
-    infogroup = userid_group_json(k_ratings)
+    #k_rating_after_cut_filepath = str(nb_item) + 'ratings_after_cut'
+    #rnames = ['user_id', 'movie_id', 'rating', 'time']
+    #k_ratings = pd.read_csv(k_rating_after_cut_filepath, skiprows=[0], sep='\t', header=None, names=rnames,engine='python')
+    #infogroup = userid_group_json(k_ratings)
 
     ###################计算出pr的值，写入prob_nodelta,json##################################################
-    nodelta_prop(links_filename,genres,infogroup)
+    #nodelta_prop(links, genres, infogroup)
 
     # 准备greedy算法的input
     n = len(list_S)
@@ -288,7 +248,7 @@ def run_one_time(config, genres, inter_info, ratings, G, k, alpha, beta, links_f
     #print('G is ok')
 
     ###################################挑选m 个 item 及其对应的 gamma,组成字典##################################
-    item_gamma = choose_gamma(m, k, wait_items, genres)
+    item_gamma = choose_gamma(m, nb_item, wait_items, genres)
     #print("gamma for every item is  ", item_gamma)
 
     ##########################得到rel（u,i）##############################################################
@@ -298,89 +258,84 @@ def run_one_time(config, genres, inter_info, ratings, G, k, alpha, beta, links_f
 
     ###########################初始化####################################################
     nb_topic = 29
-    User, Item, X = init_reset(n, m)
+    User, Item, X = ns_graph.init_reset(n, m)
     #print("User=", User)
     #print("Item=", Item)
     #print("X=", X)
     gamma = np.zeros(nb_topic)
-    reco, benefit = ns_greedy.greedy(G, list_S, gamma, item_gamma, Item, k, PR_rel, X, alpha, beta)
+    reco, benefit = ns_greedy.greedy(G, list_S, gamma, item_gamma, Item, nb_item, PR_rel, X, coef_sw, coef_f)
     #print("our recommendations' list is :", reco)
     #print("there are ", len(reco), "items")
     print(benefit)
-    x = [j for j in range(1, k + 1)]
+    x = [j for j in range(1, nb_item + 1)]
     y = benefit
     return benefit
 #end def run_one_time
 
-def top_n_most_seen_film(ratings, n):
-    return Counter(list(ratings['movie_id'])).most_common(n)
-
-def top_n_most_seen_film_within_group(group, ratings, n):
-    return Counter(map(lambda x: x['movie_id'], filter((lambda x: x['user_id'] in group), ratings.itertuples(index=False)))).most_common(n)
-
 #def create_k_core_group(links):
 
 
-def validation(config, nb_k,m,x,alpha,beta):
+def validation(config, nb_item_range, groupsize, x_core, coef_sw, coef_f, top_range):
     # step1：确定观察对象个数k-size
-    genres = ns_util.smart_json_load(config['input']['genres'], 'r')
-    prob = ns_util.smart_json_load(config['input']['prob_nodelta'], 'r')
-    inter_info = ns_util_smart_open(config['input']['useful_edges_interaction_info'], 'r')
-    links = pd.read_csv(config['input']['links_after_2wash_path'], skiprows=[0], sep='\t', header=None, names=mnames, engine='python')
-    ratings = pd.read_csv(config['input']['ratings_after_3wash'], sep='\t', engine='python')
+    genres = ns_util.smart_json_load(config['input']['genres'])
+    prob = ns_util.smart_json_load(config['input']['prob_nodelta'])
+    #inter_info = ns_util.smart_json_load(config['input']['useful_edges_interaction_info'])
+    mnames = ['user_id', 'friend_id']  # genres means tags
+    links = pd.read_csv(config['input']['links_after_2wash'], skiprows=[0], sep='\t', header=None, names=mnames, engine='python')
+    mnames = ['userid', 'movieid', 'rating', 'date']
+    ratings = pd.read_csv(config['input']['ratings_after_3wash'], skiprows=[0], sep='\t', header=None, names=mnames, engine='python')
+    top_n = top_n_most_seen_film(ratings, top_range)
+    top_n1 = list(map(lambda x: x[0], top_n))
     G = ns_graph.topic_network(links, prob, nb_topic=29)
-    
-    y = []
-    for k in range(1, nb_k):
-        items = [i for i in range(m - k, m)]
-        recommendation = run_one_time(config, genres, inter_info, ratings, G, k, alpha, beta, config['input']['links_after_2wash_path'])
+    print('files loaded')
+
+    precision_validation = []
+    for nb_item in range(1, nb_item_range):
+        items = [i for i in range(groupsize - nb_item, groupsize)]
+        recommendation = run_one_time(config, genres, links, ratings, top_n1, G, nb_item, groupsize, x_core, coef_sw, coef_f)
         #valide = reduce((lambda count, x: count+1), filter(lambda x: x in item), recomendation)
         valide = 0
         for item in recommendation:
             if item in items:
                 valide = valide + 1
         #print(valide)
-        p = valide / k
-        y.append(p)
-    x = [j for j in range(1, 6)]
-    print(111111111)
-    print(y)
-    print(22222222)
-    plt.plot(x, y, linestyle="-", marker="^", linewidth=1)
-    plt.xlabel("k-size items")
-    plt.ylabel("precision validation")
-    plt.xticks(x)
-    plt.savefig('validation_result.png')
+        p = valide / nb_item
+        precision_validation.append(p)
+    return precision_validation
 #end def validation
 
 def load_config(config_path):
-    with ns_util_smart_open(config_path) as config_file:
+    with ns_util.smart_open(config_path) as config_file:
         return json.load(config_file)
 #end def load_config
 
 def main():
     parser = argparse.ArgumentParser(description='recommend films to groups of user')
-    parser.add_argument('--config', nargs=1, metavar='FILE', type=str, required=False, default='config.json'
+    parser.add_argument('--config', nargs=1, metavar='FILE', type=str, required=False, default='../config.json'
             , help='configuration file containing input file locations and default parameters (default=config.json)')
-    parser.add_argument('--nb_k', nargs=1, metavar='K', type=float, required=False, help='number of links in group of user')
-    parser.add_argument('--alpha', nargs=1, metavar='A', type=float, required=False, help='Social welfare coeficient (between 0.0 and 1.0)')
-    parser.add_argument('--beta', nargs=1, metavar='B', type=float, required=False, help='faireness coeficient (between 0.0 and 1.0)')
-    parser.add_argument('--m', nargs=1, metavar='M', type=float, required=False, help="number of users in a group")
-    parser.add_argument('--x', nargs=1, metavar='X', type=float, required=False, help="minimum number of links from one user to other users in a group")
+    parser.add_argument('--nb_item_range', nargs=1, metavar='K', type=float, required=False, help='number of items_to_be_tested')
+    parser.add_argument('--coef_sw', nargs=1, metavar='A', type=float, required=False, help='Social welfare coeficient (between 0.0 and 1.0)')
+    parser.add_argument('--coef_f', nargs=1, metavar='B', type=float, required=False, help='faireness coeficient (between 0.0 and 1.0)')
+    parser.add_argument('--groupsize', nargs=1, metavar='M', type=float, required=False, help="number of users in a group")
+    parser.add_argument('--x_core', nargs=1, metavar='X', type=float, required=False, help="minim1um number of links from one user to other users in a group")
+    parser.add_argument('--top_range', nargs=1, metavar='T', type=float, required=False, help="numbers of top item that we choose our target items")
     args = parser.parse_args()
     
-    config = load_config(args.config[0])
-    if (args.alpha != None):
-        config["alpha"] = args.alpha[0]
-    if (args.beta != None):
-        config["beta"] = args.beta[0]
-    if (args.m != None):
-        config["m"] = args.m[0]
-    if (args.x != None):
-        config["x"] = args.x[0]
-    if (args.nb_k != None):
-        config["nb_k"] = args.nb_k[0]
-    validation(config, config["nb_k"], config["m"], config["x"], config["alpha"], config["beta"])
+    config = load_config(args.config)
+    if (args.coef_sw != None):
+        config["coef_sw"] = args.coef_sw[0]
+    if (args.coef_f != None):
+        config["coef_f"] = args.coef_f[0]
+    if (args.groupsize != None):
+        config["groupsize"] = args.groupsize[0]
+    if (args.x_core != None):
+        config["x_core"] = args.x_core[0]
+    if (args.nb_item_range != None):
+        config["nb_item_range"] = args.nb_item_range[0]
+    if (args.top_range != None):
+        config["top_range"] = args.top_range[0]
+    precision_validation = validation(config, config["nb_item_range"], config["groupsize"], config["x_core"], config["coef_sw"], config["coef_f"], config["top_range"])
+    smart_json_write(precision_validation, config["output_file"])
 #end def main
 
 if __name__ == '__main__':
