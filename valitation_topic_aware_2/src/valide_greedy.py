@@ -1,4 +1,7 @@
 import valide_graph as graph
+import copy
+import valide_math as ns_math
+import valide_graph as ns_graph
 
 #def activation_neib(w, neigb_w, actived, gamma, edge_labels):
 #def sampling_one_time(G, list_S, gamma, edge_labels):
@@ -102,8 +105,8 @@ def proximate_sampling_ap(G, list_S, gamma, edge_labels, R):
 
 
 def influence_spread(G, list_S, gamma):
-    edge_labels = double_edge_label(G)
-    dict_simulate_ap,prob_active = lib_graph_sap.proximate_sampling_ap(G, list_S, gamma, edge_labels, R=20)
+    edge_labels = ns_graph.double_edge_label(G)
+    dict_simulate_ap,prob_active = proximate_sampling_ap(G, list_S, gamma, edge_labels, R=20)
     #text_save([gamma, dict_simulate_ap], 'dic_all_result.json', 'a')
 
     V = list(G.nodes)
@@ -139,8 +142,8 @@ def select(Graph, Sender, gamma, dict_gamma, Item, seeds, PR_relevence, X, coef_
         # print("number of new_seeds=", len(new_seeds))
         new_X = copy.deepcopy(X)
         new_X[i] = 1
-        sw = SW(new_seeds, PR_relevence, new_X)
-        f = F(new_seeds, PR_relevence, new_X, "Least Misery")
+        sw = ns_math.SW(new_seeds, PR_relevence, new_X)
+        f = ns_math.F(new_seeds, PR_relevence, new_X, "Least Misery")
         influence = influence_spread(Graph, Sender, new_gamma)
         list_sw.append(sw)
         list_f.append(f)
