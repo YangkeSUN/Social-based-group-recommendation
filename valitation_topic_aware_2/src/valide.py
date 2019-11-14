@@ -335,7 +335,7 @@ def main():
     if (args.top_range != None):
         config["top_range"] = args.top_range[0]
     precision_validation = validation(config, config["nb_item_range"], config["groupsize"], config["x_core"], config["coef_sw"], config["coef_f"], config["top_range"])
-    smart_json_write(precision_validation, config["output_file"])
+    ns_util.smart_json_write(precision_validation, config["output_file"])
 #end def main
 
 if __name__ == '__main__':
