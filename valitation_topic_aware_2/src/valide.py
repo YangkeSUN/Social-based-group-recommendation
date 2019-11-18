@@ -193,13 +193,13 @@ def choose_gamma(m,nb_item,wait_items,genres):
 #end def choose_gamma
 
 def initial(genres, links, ratings, top_n, groupsize, x_core, nb_item):
-    #做一些准备工作，得到待观察的items以及sender group，并记录号cut掉关系的ratings
+    # 做一些准备工作，得到待观察的items以及sender group，并记录号cut掉关系的ratings
 
     # print('all logs=',len(ratings))
     # print('all items=',len(set(list(ratings['movieid']))))
 
     exist_items = list(genres.keys())
-    #print(len(exist_items))
+    # print(len(exist_items))
 
     ####################################### 选择 k 个 待观察的items，以及 senders#################################
     items, users = chose_item_sender(links, ratings, nb_item, groupsize, x_core, top_n)
@@ -210,33 +210,42 @@ def initial(genres, links, ratings, top_n, groupsize, x_core, nb_item):
 
     senders = random.sample(users, groupsize)
 
-    #logger.info('wait_items ={}'.format(items))
-    #logger.info('senders ={}'.format(senders))
-    ns_util.text_save([items],'../output/wait_info.txt')
-    ns_util.text_save([senders],'../output/wait_info.txt')
+    # logger.info('wait_items ={}'.format(items))
+    # logger.info('senders ={}'.format(senders))
+    ns_util.text_save([items], '../output/wait_info.txt')
+    ns_util.text_save([senders], '../output/wait_info.txt')
 
     #######################################删除item与senders间的评价关系##########################################
     # 有了待评价的items以及senders之后，删除senders和items之间的rating——log。
     ratings_after_cut = ratings.drop(
         ratings.loc[(ratings['userid'].isin(senders)) & (ratings['movieid'].isin(items))].index)
-    #print(len(ratings))
-    #print(len(ratings_after_cut))
-    #ratings_after_cut.to_csv(str(nb_item)+'ratings_after_cut', sep='\t', index=False)
+    # print(len(ratings))
+    # print(len(ratings_after_cut))
+    # ratings_after_cut.to_csv(str(nb_item)+'ratings_after_cut', sep='\t', index=False)
 
-    return items,senders
-#end def initial
+    return items, senders
+
+
+# end def initial
+
 
 def run_one_time(config, genres, links, ratings, top_n, G, nb_item, groupsize, x_core, coef_sw, coef_f):
     # step1：确定观察对象个数k-size 为k
 
-    #step2：选择k个观察对象与senders，并切断他们之间的rating记录
-    wait_items, list_S = initial(genres, links, ratings, top_n, groupsize, x_core, nb_item)
+    # step1：确定观察对象个数k-size 为k
 
-    #step3：根据cut后的rating以及links信息，计算社交图里，每条边的传播概率（topic-aware），生成prob的json文件储存相关信息
-    #k_rating_after_cut_filepath = str(nb_item) + 'ratings_after_cut'
-    #rnames = ['user_id', 'movie_id', 'rating', 'time']
-    #k_ratings = pd.read_csv(k_rating_after_cut_filepath, skiprows=[0], sep='\t', header=None, names=rnames,engine='python')
-    #infogroup = userid_group_json(k_ratings)
+    # step2：选择k个观察对象与senders，并切断他们之间的rating记录
+    wait_items, list_S = ns_item_group.initial_items_to_groups(ratings, top_n, nb_item, groupsize)
+
+    # 233行 改为：
+    # wait_items, list_S = ns_group_item.initial_groups_to_items(links, ratings, x_core, nb_item, groupsize)
+    # wait_items, list_S = ns_item_group.initial_items_to_groups(ratings, top_n, nb_item, groupsize)
+
+    # step3：根据cut后的rating以及links信息，计算社交图里，每条边的传播概率（topic-aware），生成prob的json文件储存相关信息
+    # k_rating_after_cut_filepath = str(nb_item) + 'ratings_after_cut'
+    # rnames = ['user_id', 'movie_id', 'rating', 'time']
+    # k_ratings = pd.read_csv(k_rating_after_cut_filepath, skiprows=[0], sep='\t', header=None, names=rnames,engine='python')
+    # infogroup = userid_group_json(k_ratings)
 
     ###################计算出pr的值，写入prob_nodelta,json##################################################
     #nodelta_prop(links, genres, infogroup)
